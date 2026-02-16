@@ -1,3 +1,4 @@
+import * as vscode from "vscode"
 import * as path from "path"
 import * as fs from "fs/promises"
 import { Task } from "../core/task/Task"
@@ -46,34 +47,57 @@ export class HookEngine {
 		}
 
 		// 2. Scope Enforcement
-		if (intentId && toolName !== "select_active_intent") {
+		if (intentId && toolName !== "select_active_intent" && toolName !== "switch_mode") {
 			const isScoped = await this.checkScope(task.cwd, intentId, toolName, params)
 			if (!isScoped.allow) {
 				return isScoped
 			}
 		}
 
-		// 3. Risk Assessment (for HITL)
-		const isDestructive = this.checkRisk(toolName, params)
-		if (isDestructive) {
-			// We return allow: true but we could flag it for HITL.
-			// For this challenge, we'll let the presentAssistantMessage handle the UI if it needs approval.
+		// 3. Risk Assessment & HITL (Day 2)
+		const riskLevel = this.assessRisk(toolName, params)
+		if (riskLevel === "destructive") {
+			const userApproved = await this.askForHITLApproval(toolName, params)
+			if (!userApproved) {
+				return {
+					allow: false,
+					reason: `> [!CAUTION]
+> **Governance Rejection.** The user denied the destructive action \`${toolName}\` during high-risk HITL verification.`,
+				}
+			}
 		}
 
 		return { allow: true }
 	}
 
-	private checkRisk(toolName: string, params: any): boolean {
+	private assessRisk(toolName: string, params: any): "safe" | "destructive" {
 		const destructiveTools = ["execute_command", "write_to_file", "apply_diff", "edit_file", "apply_patch"]
-		if (!destructiveTools.includes(toolName)) return false
+		if (!destructiveTools.includes(toolName)) return "safe"
 
 		if (toolName === "execute_command") {
 			const cmd = params.command.toLowerCase()
-			const patterns = ["rm ", "chmod ", "chown ", "shred ", "> /dev/", "systemctl ", "sudo "]
-			if (patterns.some((p) => cmd.includes(p))) return true
+			// Refined Regex Assessment (Phase 2)
+			const destructiveRegex =
+				/\b(rm|chmod|chown|shred|systemctl|sudo|truncate|mv|cp)\b.*(-f|--force|\/dev\/|\/etc\/|\/boot\/)/i
+			if (destructiveRegex.test(cmd) || cmd.includes("> /dev/")) {
+				return "destructive"
+			}
 		}
 
-		return true
+		// All file writes are considered semi-destructive but we reserve "destructive"
+		// for high-risk system operations for the HITL UI demo.
+		return "safe"
+	}
+
+	private async askForHITLApproval(toolName: string, params: any): Promise<boolean> {
+		const target = params.command || params.path || "target action"
+		const result = await vscode.window.showWarningMessage(
+			`GOVERNANCE ALERT: Destructive action detected (${toolName}). Proceed?`,
+			{ modal: true, detail: `Target: ${target}` },
+			"Allow",
+			"Block",
+		)
+		return result === "Allow"
 	}
 
 	/**
