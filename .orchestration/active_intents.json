@@ -1,0 +1,15 @@
+{
+	"intents": [
+		{
+			"id": "INTENT-001",
+			"description": "Initialize the project's orchestration layer and reasoning loop.",
+			"status": "active",
+			"scope": [".orchestration/*", "src/core/tools/*", "src/core/prompts/*"],
+			"constraints": [
+				"Must not use external libraries for hashing.",
+				"Must follow the Interceptor Pattern for hooks."
+			],
+			"acceptance_criteria": ["select_active_intent tool is functional.", "System prompt reflects active intent."]
+		}
+	]
+}

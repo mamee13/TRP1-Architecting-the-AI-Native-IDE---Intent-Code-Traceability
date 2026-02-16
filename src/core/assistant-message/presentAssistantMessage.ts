@@ -37,6 +37,8 @@ import { generateImageTool } from "../tools/GenerateImageTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
+import { selectActiveIntentTool } from "../tools/SelectActiveIntentTool"
+import { HookEngine } from "../../hooks/HookEngine"
 
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
@@ -100,6 +102,8 @@ export async function presentAssistantMessage(cline: Task) {
 		cline.presentAssistantMessageLocked = false
 		return
 	}
+
+	const hookEngine = HookEngine.getInstance()
 
 	switch (block.type) {
 		case "mcp_tool_use": {
@@ -176,6 +180,20 @@ export async function presentAssistantMessage(cline: Task) {
 					if (imageBlocks.length > 0) {
 						cline.userMessageContent.push(...imageBlocks)
 					}
+
+					// --- POST-HOOK (Phase 3 Prep) ---
+					hookEngine
+						.onPostExecute(
+							{
+								task: cline,
+								toolName: "use_mcp_tool", // MCP tools are consolidated
+								params: mcpBlock.arguments,
+								intentId: (cline as any).activeIntentId,
+							},
+							resultContent,
+						)
+						.catch((err: Error) => console.error("Post-hook failed:", err))
+					// --------------------------------
 				}
 
 				hasToolResult = true
@@ -383,6 +401,8 @@ export async function presentAssistantMessage(cline: Task) {
 						return `[${block.name} for '${block.params.skill}'${block.params.args ? ` with args: ${block.params.args}` : ""}]`
 					case "generate_image":
 						return `[${block.name} for '${block.params.path}']`
+					case "select_active_intent":
+						return `[${block.name} for '${block.params.intent_id}']`
 					default:
 						return `[${block.name}]`
 				}
@@ -487,6 +507,20 @@ export async function presentAssistantMessage(cline: Task) {
 				if (imageBlocks.length > 0) {
 					cline.userMessageContent.push(...imageBlocks)
 				}
+
+				// --- POST-HOOK (Phase 3 Prep) ---
+				hookEngine
+					.onPostExecute(
+						{
+							task: cline,
+							toolName: block.name as ToolName,
+							params: block.params,
+							intentId: (cline as any).activeIntentId,
+						},
+						resultContent,
+					)
+					.catch((err: any) => console.error("Post-hook failed:", err))
+				// --------------------------------
 
 				hasToolResult = true
 			}
@@ -674,6 +708,29 @@ export async function presentAssistantMessage(cline: Task) {
 					break
 				}
 			}
+
+			// --- GOVERNANCE INTERCEPTOR (Phase 2) ---
+			const hookResult = await hookEngine.onPreExecute({
+				task: cline,
+				toolName: block.name as ToolName,
+				params: block.params,
+				intentId: (cline as any).activeIntentId,
+			})
+
+			if (!hookResult.allow && !block.partial) {
+				const errorMessage = hookResult.reason || "Tool execution blocked by governance hooks."
+				await cline.say("error", errorMessage)
+
+				cline.pushToolResultToUserContent({
+					type: "tool_result",
+					tool_use_id: sanitizeToolUseId(toolCallId),
+					content: formatResponse.toolError(errorMessage),
+					is_error: true,
+				})
+
+				break
+			}
+			// ----------------------------------------
 
 			switch (block.name) {
 				case "write_to_file":
