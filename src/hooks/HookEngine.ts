@@ -208,15 +208,42 @@ export class HookEngine {
 			}
 
 			const trace = {
+				id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
 				timestamp: new Date().toISOString(),
-				intentId: params.intent_id || intentId,
-				toolName,
-				params: {
-					path: params.path || params.file_path,
-					mutation_class: params.mutation_class,
-				},
-				contentHash,
+				vcs: { revision_id: "local" }, // Placeholder for git SHA
+				files: [
+					{
+						relative_path: params.path || params.file_path,
+						conversations: [
+							{
+								url: task.taskId || "local-session",
+								contributor: {
+									entity_type: "AI",
+									model_identifier: "assistant",
+								},
+								ranges: [
+									{
+										start_line: 1, // Full file or diff range
+										end_line: contentHash ? 0 : 0, // Simplified for now
+										content_hash: `sha256:${contentHash}`,
+									},
+								],
+								related: [
+									{
+										type: "specification",
+										value: params.intent_id || intentId,
+									},
+									{
+										type: "mutation_class",
+										value: params.mutation_class,
+									},
+								],
+							},
+						],
+					},
+				],
 				status: "success",
+				toolName, // Metadata
 			}
 
 			await fs.appendFile(traceFile, JSON.stringify(trace) + "\n")
@@ -244,7 +271,14 @@ export class HookEngine {
 	private async updateIntentMap(cwd: string, trace: any): Promise<void> {
 		const mapFile = path.join(cwd, ".orchestration", "intent_map.md")
 		const date = new Date().toLocaleDateString()
-		const line = `| ${date} | ${trace.intentId} | ${trace.params.path} | ${trace.params.mutation_class} | ${trace.contentHash.substring(0, 7)} |\n`
+
+		const file = trace.files[0]
+		const conv = file.conversations[0]
+		const intentId = conv.related.find((r: any) => r.type === "specification")?.value ?? "UNKNOWN"
+		const mutationClass = conv.related.find((r: any) => r.type === "mutation_class")?.value ?? "UNKNOWN"
+		const hash = conv.ranges[0].content_hash.substring(7, 14)
+
+		const line = `| ${date} | ${intentId} | ${file.relative_path} | ${mutationClass} | ${hash} |\n`
 
 		try {
 			let content = ""
@@ -256,7 +290,7 @@ export class HookEngine {
 					"# Intent-to-Code Spatial Map\n\n| Date | Intent ID | File Path | Mutation Class | Content Hash |\n| :--- | :--- | :--- | :--- | :--- |\n"
 			}
 
-			if (!content.includes(trace.contentHash.substring(0, 7))) {
+			if (!content.includes(hash)) {
 				await fs.appendFile(mapFile, line)
 			}
 		} catch (error) {
