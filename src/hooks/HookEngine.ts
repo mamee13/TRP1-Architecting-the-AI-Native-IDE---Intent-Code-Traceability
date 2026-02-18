@@ -1,9 +1,10 @@
 import * as vscode from "vscode"
 import * as path from "path"
 import * as fs from "fs/promises"
+import * as crypto from "crypto"
 import { Task } from "../core/task/Task"
 import { ToolName } from "@roo-code/types"
-import { ToolUse } from "../shared/tools"
+import { generateHash } from "../utils/crypto"
 
 export interface HookContext {
 	task: Task
@@ -21,6 +22,19 @@ export class HookEngine {
 	private static instance: HookEngine
 	private lastReadHashes: Map<string, string> = new Map()
 
+	private static readonly MUTATING_TOOLS: ToolName[] = [
+		"write_to_file",
+		"apply_diff",
+		"execute_command",
+		"edit_file",
+		"apply_patch",
+	]
+	private static readonly ESSENTIAL_TOOLS: ToolName[] = [
+		"select_active_intent",
+		"switch_mode",
+		"ask_followup_question",
+	]
+
 	private constructor() {}
 
 	public static getInstance(): HookEngine {
@@ -36,96 +50,109 @@ export class HookEngine {
 	 */
 	public async onPreExecute(context: HookContext): Promise<HookResponse> {
 		const { toolName, params, intentId, task } = context
+		console.log(`[GOVERNANCE] HookEngine.onPreExecute: tool=${toolName}, intent=${intentId || "NONE"}`)
 
-		// 1. Mandatory Intent Execution
-		if (!intentId && toolName !== "select_active_intent") {
+		// 1. Mandatory Intent Check (The Gatekeeper)
+		// Relaxed: Allow conversational, planning, and read-only tools without an intent.
+		if (HookEngine.MUTATING_TOOLS.includes(toolName) && !intentId) {
+			console.log(`[GOVERNANCE] Gatekeeper: Blocking mutation ${toolName} - No active intent.`)
 			return {
 				allow: false,
-				reason: `> [!STOP]
-> **Orchestration Gatekeeper Triggered.** You are attempting to call \`${toolName}\` without an active intent. 
-> You MUST call \`select_active_intent\` first to link your actions to a business goal.`,
+				reason: "> [!ERROR]\n> **Gatekeeper Violation.** You must call `select_active_intent` before performing code mutations or executing commands.",
 			}
 		}
 
-		// 2. Intent ID Consistency (Phase 3)
-		if (params.intent_id && intentId && params.intent_id !== intentId) {
+		if (!intentId && !HookEngine.ESSENTIAL_TOOLS.includes(toolName)) {
+			console.log(`[GOVERNANCE] Gatekeeper: Monitoring ${toolName} (Conversational/Read-Only) - Passive mode.`)
+		}
+
+		// 2. Intent ID Consistency
+		if (params?.intent_id && intentId && params.intent_id !== intentId) {
+			console.log(`[GOVERNANCE] Intent Mismatch: params=${params.intent_id} vs state=${intentId}`)
 			return {
 				allow: false,
-				reason: `> [!WARNING]
-> **Traceability Mismatch.** The \`intent_id\` provided in the tool call (\`${params.intent_id}\`) does not match the active intent (\`${intentId}\`).
-> Please ensure you are working on the correct business goal.`,
+				reason: `> [!WARNING]\n> **Intent Mismatch detected.** You provided '${params.intent_id}' but active intent is '${intentId}'.`,
 			}
 		}
 
 		// 3. Mutation Classification Requirement (Phase 3)
-		const mutationTools = ["write_to_file", "apply_diff"]
-		if (mutationTools.includes(toolName) && !params.mutation_class) {
+		if (HookEngine.MUTATING_TOOLS.includes(toolName) && !params?.mutation_class) {
+			console.log(`[GOVERNANCE] Missing Mutation Class for ${toolName}`)
 			return {
 				allow: false,
-				reason: `> [!IMPORTANT]
-> **Classification Required.** Semantic Traceability is enabled. You MUST specify a \`mutation_class\` (EVOLUTION, REFACTOR, FIX, or DOCS) for this change.`,
+				reason: `> [!IMPORTANT]\n> **Traceability Requirement.** You must provide a \`mutation_class\` (EVOLUTION, REFACTOR, FIX, DOCS) for this action.`,
 			}
 		}
 
 		// 4. Optimistic Locking (Phase 4)
-		if (mutationTools.includes(toolName) && params.path) {
+		if (HookEngine.MUTATING_TOOLS.includes(toolName) && params.path) {
 			const absolutePath = path.resolve(task.cwd, params.path)
-			const { generateHash } = await import("../utils/crypto")
-			try {
-				const currentContent = await fs.readFile(absolutePath, "utf-8")
-				const currentHash = generateHash(currentContent)
-				const lastHash = this.lastReadHashes.get(absolutePath)
+			const currentContent = await fs.readFile(absolutePath, "utf-8").catch(() => "")
+			const currentHash = generateHash(currentContent)
+			const expectedHash = this.lastReadHashes.get(absolutePath)
 
-				if (lastHash && currentHash !== lastHash) {
-					return {
-						allow: false,
-						reason: `> [!STOP]
-> **Optimistic Locking Triggered.** The file \`${params.path}\` has changed on disk since you last read it (State Drift).
-> **Action Required:** You MUST re-read the file using \`read_file\` to synchronize your context before attempting further modifications.`,
-					}
+			console.log(`[ORCHESTRATION] Optimistic Lock Check: ${params.path}`)
+			console.log(
+				`[ORCHESTRATION] State: Current=${currentHash.substring(0, 7)}, Expected=${expectedHash?.substring(0, 7) || "NONE"}`,
+			)
+
+			if (expectedHash && currentHash !== expectedHash) {
+				console.log(`[ORCHESTRATION] !!! STALE FILE DETECTED !!! - ${params.path}`)
+				return {
+					allow: false,
+					reason: `> [!CAUTION]\n> **Stale File Detected.** '${params.path}' has been modified externally since you last read it. Please re-read the file to sync state before writing.`,
 				}
-				// Also store it if not present to have a baseline
-				if (!lastHash) {
-					this.lastReadHashes.set(absolutePath, currentHash)
-				}
-			} catch (e) {
-				// File might not exist (new file)
 			}
 		}
 
-		// 5. Scope Enforcement
-		if (intentId && toolName !== "select_active_intent" && toolName !== "switch_mode") {
-			const isScoped = await this.checkScope(task.cwd, intentId, toolName, params)
-			if (!isScoped.allow) {
-				return isScoped
+		// 5. Scope Enforcement (Phase 2)
+		if (intentId) {
+			const scopeResponse = await this.checkScope(task.cwd, intentId, toolName, params)
+			if (!scopeResponse.allow) {
+				console.log(`[GOVERNANCE] Scope Violation: ${scopeResponse.reason}`)
+				return scopeResponse
 			}
 		}
 
 		// 6. Circuit Breaker (Phase 4)
 		const FAILURE_THRESHOLD = 5
 		if (task.consecutiveMistakeCount >= FAILURE_THRESHOLD) {
+			console.log(`[ORCHESTRATION] Circuit Breaker Tripped: ${task.consecutiveMistakeCount} failures`)
 			return {
 				allow: false,
-				reason: `> [!STOP]
-> **Circuit Breaker Triggered.** You have reached the consecutive failure threshold (${FAILURE_THRESHOLD}). 
-> To prevent infinite loops and resource exhaustion, execution is halted. 
-> **Action Required:** Please review your recent errors and adjust your strategy before continuing.`,
+				reason: `> [!STOP]\n> **Circuit Breaker Triggered.** You have reached the consecutive failure threshold (${FAILURE_THRESHOLD}). \n> To prevent infinite loops and resource exhaustion, execution is halted. \n> **Action Required:** Please review your recent errors and adjust your strategy before continuing.`,
 			}
 		}
 
-		// 7. Risk Assessment & HITL (Day 2)
-		const riskLevel = this.assessRisk(toolName, params)
-		if (riskLevel === "destructive") {
-			const userApproved = await this.askForHITLApproval(toolName, params)
-			if (!userApproved) {
-				return {
-					allow: false,
-					reason: `> [!CAUTION]
-> **Governance Rejection.** The user denied the destructive action \`${toolName}\` during high-risk HITL verification.`,
+		// 7. Risk Assessment & HITL (Phase 2)
+		const destructivePatterns = ["rm ", "sudo ", "mkfs ", "> /dev/"]
+		if (toolName === "execute_command") {
+			const command = params.command || ""
+			if (destructivePatterns.some((pattern) => command.includes(pattern))) {
+				console.log(`[GOVERNANCE] High-Risk Command Detected: ${command}`)
+				// Note: In Roo Code, HITL is usually handled by the provider.
+				// Here we simulate the guardrail check.
+				const approved = await vscode.window.showWarningMessage(
+					`High-Risk Action Detected: ${command}. Do you approve?`,
+					"Approve",
+					"Reject",
+				)
+
+				if (approved !== "Approve") {
+					console.log(`[GOVERNANCE] User REJECTED high-risk action: ${command}`)
+					return {
+						allow: false,
+						reason: "User rejected this high-risk action. Please find a safer alternative.",
+					}
 				}
+				console.log(`[GOVERNANCE] User APPROVED high-risk action: ${command}`)
 			}
 		}
 
+		console.log(`[GOVERNANCE] HookEngine: PASSED all pre-checks for ${toolName}`)
+		if (HookEngine.ESSENTIAL_TOOLS.includes(toolName)) {
+			console.log(`[GOVERNANCE] Tool Params: ${JSON.stringify(params)}`)
+		}
 		return { allow: true }
 	}
 
@@ -160,108 +187,109 @@ export class HookEngine {
 	}
 
 	/**
-	 * Post-Hook: Executed after a tool successfully completes.
-	 * Handles traceability and state updates.
+	 * Post-Hook: Executed after tool completion.
+	 * Updates spatial hashes and generates traces.
 	 */
 	public async onPostExecute(context: HookContext, result: any): Promise<void> {
 		const { toolName, params, intentId, task } = context
-
-		// Load crypto utility dynamically
-		const { generateHash } = await import("../utils/crypto")
+		console.log(
+			`[GOVERNANCE] HookEngine.onPostExecute: tool=${toolName}, status=${result?.isError ? "FAILURE" : "SUCCESS"}`,
+		)
 
 		// 1. Update Optimistic Locking state
 		if (toolName === "read_file" && params.path) {
 			const absolutePath = path.resolve(task.cwd, params.path)
 			try {
 				const content = await fs.readFile(absolutePath, "utf-8")
-				this.lastReadHashes.set(absolutePath, generateHash(content))
-			} catch (e) {}
+				const hash = generateHash(content)
+				this.lastReadHashes.set(absolutePath, hash)
+				console.log(`[ORCHESTRATION] Updated Read Hash for ${params.path}: ${hash.substring(0, 7)}`)
+			} catch (e) {
+				console.log(`[ORCHESTRATION] Failed to update read hash for ${params.path}`)
+			}
 		}
 
-		// Only trace code mutations for now
-		const traceableTools = ["write_to_file", "apply_diff", "edit_file", "apply_patch"]
-		if (!traceableTools.includes(toolName)) {
-			return
+		if (toolName === "write_to_file" && params.path) {
+			const absolutePath = path.resolve(task.cwd, params.path)
+			const hash = generateHash(params.content || "")
+			this.lastReadHashes.set(absolutePath, hash)
+			console.log(`[ORCHESTRATION] Updated Write Hash for ${params.path}: ${hash.substring(0, 7)}`)
 		}
 
-		try {
-			const orchestrationDir = path.join(task.cwd, ".orchestration")
-			const traceFile = path.join(orchestrationDir, "agent_trace.jsonl")
+		// 2. Generate Agent Trace (Phase 3 & Day 3)
+		if ((toolName === "write_to_file" || toolName === "apply_diff") && !result?.isError) {
+			try {
+				console.log(`[TRACE] Generating transformation record for ${params.path || params.file_path}...`)
+				const orchestrationDir = path.join(task.cwd, ".orchestration")
+				// Ensure directory exists (Phase 4 Robustness)
+				await fs.mkdir(orchestrationDir, { recursive: true })
 
-			let contentHash = ""
-			if (toolName === "write_to_file" && params.content) {
-				contentHash = generateHash(params.content)
+				const traceFile = path.join(orchestrationDir, "agent_trace.jsonl")
+				console.log(`[TRACE] Logging transformation to ${traceFile}`)
+
+				let contentHash = ""
 				if (params.path) {
 					const absolutePath = path.resolve(task.cwd, params.path)
-					this.lastReadHashes.set(absolutePath, contentHash)
+					const content = await fs.readFile(absolutePath, "utf-8").catch(() => "")
+					contentHash = generateHash(content)
 				}
-			} else if (toolName === "apply_diff" && params.path) {
-				const absolutePath = path.resolve(task.cwd, params.path)
-				try {
-					const newContent = await fs.readFile(absolutePath, "utf-8")
-					contentHash = generateHash(newContent)
-					// Update lock state after successful write
-					this.lastReadHashes.set(absolutePath, contentHash)
-				} catch (e) {
-					// File might not exist yet or error reading
-				}
-			}
 
-			const trace = {
-				id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-				timestamp: new Date().toISOString(),
-				vcs: { revision_id: "local" }, // Placeholder for git SHA
-				files: [
-					{
-						relative_path: params.path || params.file_path,
-						conversations: [
-							{
-								url: task.taskId || "local-session",
-								contributor: {
-									entity_type: "AI",
-									model_identifier: "assistant",
+				const trace = {
+					id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
+					timestamp: new Date().toISOString(),
+					vcs: { revision_id: "local" }, // Placeholder for git SHA
+					files: [
+						{
+							relative_path: params.path || params.file_path,
+							conversations: [
+								{
+									url: task.taskId || "local-session",
+									contributor: {
+										entity_type: "AI",
+										model_identifier: "assistant",
+									},
+									ranges: [
+										{
+											start_line: 1, // Full file or diff range
+											end_line: contentHash ? 0 : 0, // Simplified for now
+											content_hash: `sha256:${contentHash}`,
+										},
+									],
+									related: [
+										{
+											type: "specification",
+											value: params.intent_id || intentId,
+										},
+										{
+											type: "mutation_class",
+											value: params.mutation_class,
+										},
+									],
 								},
-								ranges: [
-									{
-										start_line: 1, // Full file or diff range
-										end_line: contentHash ? 0 : 0, // Simplified for now
-										content_hash: `sha256:${contentHash}`,
-									},
-								],
-								related: [
-									{
-										type: "specification",
-										value: params.intent_id || intentId,
-									},
-									{
-										type: "mutation_class",
-										value: params.mutation_class,
-									},
-								],
-							},
-						],
-					},
-				],
-				status: "success",
-				toolName, // Metadata
+							],
+						},
+					],
+					status: "success",
+					toolName, // Metadata
+				}
+
+				await fs.appendFile(traceFile, JSON.stringify(trace) + "\n")
+				console.log(`[TRACE] => agent_trace.jsonl updated (${trace.id.substring(0, 8)})`)
+
+				// Also update intent_map.md (Day 3 requirement)
+				await this.updateIntentMap(task.cwd, trace)
+				console.log(`[TRACE] => intent_map.md updated (Spatial Map)`)
+
+				// 3. Context Compaction Hook (Phase 4)
+				const MESSAGE_THRESHOLD = 50
+				if (task.clineMessages.length > MESSAGE_THRESHOLD) {
+					console.warn(
+						`[GOVERNANCE] !!! CONTEXT ROT DETECTED !!!: ${task.clineMessages.length} messages. Consider summarization to preserve signal-to-noise ratio.`,
+					)
+				}
+			} catch (error) {
+				console.error("Failed to generate agent trace:", error)
 			}
-
-			await fs.appendFile(traceFile, JSON.stringify(trace) + "\n")
-
-			// Also update intent_map.md (Day 3 requirement)
-			await this.updateIntentMap(task.cwd, trace)
-
-			// 3. Context Compaction Hook (Phase 4)
-			const MESSAGE_THRESHOLD = 50
-			if (task.clineMessages.length > MESSAGE_THRESHOLD) {
-				console.warn(
-					`[GOVERNANCE] Context Rot detected: ${task.clineMessages.length} messages. Consider summarization.`,
-				)
-				// In a real implementation, we might trigger a summarization agent here.
-				// For the challenge, we log it for the "Edge Governance" score.
-			}
-		} catch (error) {
-			console.error("Failed to generate agent trace:", error)
 		}
 	}
 

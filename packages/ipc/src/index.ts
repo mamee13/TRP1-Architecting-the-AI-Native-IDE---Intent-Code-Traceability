@@ -1,2 +1,2 @@
-export * from "./ipc-client.js"
-export * from "./ipc-server.js"
+export * from "./ipc-client"
+export * from "./ipc-server"

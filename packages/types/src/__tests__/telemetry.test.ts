@@ -12,7 +12,7 @@ import {
 	ConsecutiveMistakeError,
 	isConsecutiveMistakeError,
 	extractConsecutiveMistakeErrorProperties,
-} from "../telemetry.js"
+} from "../telemetry"
 
 describe("telemetry error utilities", () => {
 	describe("getErrorStatusCode", () => {

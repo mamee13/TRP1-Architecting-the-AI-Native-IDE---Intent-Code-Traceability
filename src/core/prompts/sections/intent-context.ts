@@ -3,8 +3,8 @@ import * as fs from "fs/promises"
 
 export async function getIntentContextSection(cwd: string, activeIntentId?: string): Promise<string> {
 	if (!activeIntentId) {
-		return `> [!IMPORTANT]
-> **No Active Intent Selected.** You MUST call \`select_active_intent\` before performing any file modifications or executing commands. This ensures all actions are tracked and governed.`
+		return `> [!NOTE]
+> **No Active Intent Selected.** You are in "Exploration Mode". While you can discuss requirements and explore the codebase, you MUST call \`select_active_intent\` before performing any file modifications or executing commands to ensure traceability.`
 	}
 
 	try {
