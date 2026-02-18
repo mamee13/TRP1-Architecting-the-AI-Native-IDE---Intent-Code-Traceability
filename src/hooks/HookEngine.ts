@@ -5,6 +5,7 @@ import * as crypto from "crypto"
 import { Task } from "../core/task/Task"
 import { ToolName } from "@roo-code/types"
 import { generateHash } from "../utils/crypto"
+import { generateStructuralHash, isStructurallyEquivalent } from "../utils/ast"
 
 export interface HookContext {
 	task: Task
@@ -21,6 +22,7 @@ export interface HookResponse {
 export class HookEngine {
 	private static instance: HookEngine
 	private lastReadHashes: Map<string, string> = new Map()
+	private lastStructuralHashes: Map<string, string> = new Map()
 
 	private static readonly MUTATING_TOOLS: ToolName[] = [
 		"write_to_file",
@@ -103,6 +105,11 @@ export class HookEngine {
 					reason: `> [!CAUTION]\n> **Stale File Detected.** '${params.path}' has been modified externally since you last read it. Please re-read the file to sync state before writing.`,
 				}
 			}
+
+			// Store structural hash for post-execute classification
+			const structuralHash = generateStructuralHash(currentContent)
+			this.lastStructuralHashes.set(absolutePath, structuralHash)
+			console.log(`[AST] Pre-mutation structural hash for ${params.path}: ${structuralHash.substring(0, 7)}`)
 		}
 
 		// 5. Scope Enforcement (Phase 2)
@@ -146,6 +153,16 @@ export class HookEngine {
 					}
 				}
 				console.log(`[GOVERNANCE] User APPROVED high-risk action: ${command}`)
+			}
+		}
+
+		// 7. Context Compaction (Master Thinker)
+		const MESSAGE_LIMIT = 40
+		if (task.clineMessages.length > MESSAGE_LIMIT) {
+			console.log(`[GOVERNANCE] Context Rot Detected: ${task.clineMessages.length} messages. Forcing compaction.`)
+			return {
+				allow: false,
+				reason: `> [!STOP]\n> **Context Rot Mitigation.** Your conversation history is currently at ${task.clineMessages.length} messages. This exceeds the project's signal-to-noise threshold. \n> **Required Action:** You must summarize the current progress and architectural state into \`CLAUDE.md\` or \`AGENT.md\`, then start a new task session to reset context.`,
 			}
 		}
 
@@ -211,9 +228,15 @@ export class HookEngine {
 
 		if (toolName === "write_to_file" && params.path) {
 			const absolutePath = path.resolve(task.cwd, params.path)
-			const hash = generateHash(params.content || "")
+			const content = params.content || ""
+			const hash = generateHash(content)
 			this.lastReadHashes.set(absolutePath, hash)
+
+			const structuralHash = generateStructuralHash(content)
+			this.lastStructuralHashes.set(absolutePath, structuralHash)
+
 			console.log(`[ORCHESTRATION] Updated Write Hash for ${params.path}: ${hash.substring(0, 7)}`)
+			console.log(`[AST] Updated Structural Hash for ${params.path}: ${structuralHash.substring(0, 7)}`)
 		}
 
 		// 2. Generate Agent Trace (Phase 3 & Day 3)
@@ -262,7 +285,18 @@ export class HookEngine {
 										},
 										{
 											type: "mutation_class",
-											value: params.mutation_class,
+											value: await this.classifyMutation(
+												task.cwd,
+												params.path || params.file_path,
+											),
+										},
+										{
+											type: "structural_hash",
+											value: `sha256:${generateStructuralHash(
+												await fs
+													.readFile(path.resolve(task.cwd, params.path || ""), "utf-8")
+													.catch(() => ""),
+											)}`,
 										},
 									],
 								},
@@ -291,6 +325,26 @@ export class HookEngine {
 				console.error("Failed to generate agent trace:", error)
 			}
 		}
+	}
+
+	private async classifyMutation(taskCwd: string, filePath: string | undefined): Promise<string> {
+		if (!filePath) return "UNKNOWN"
+		const absolutePath = path.resolve(taskCwd, filePath)
+		const prevHash = this.lastStructuralHashes.get(absolutePath)
+
+		try {
+			const currentContent = await fs.readFile(absolutePath, "utf-8")
+			const currentHash = generateStructuralHash(currentContent)
+
+			if (prevHash && currentHash === prevHash) {
+				console.log(`[AST] Structural match detected for ${filePath} - Auto-classifying as AST_REFACTOR`)
+				return "AST_REFACTOR"
+			}
+		} catch (e) {
+			console.log(`[AST] Could not read file for classification: ${filePath}`)
+		}
+
+		return "EVOLUTION"
 	}
 
 	/**

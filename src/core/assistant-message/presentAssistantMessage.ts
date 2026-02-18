@@ -38,6 +38,7 @@ import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 import { selectActiveIntentTool } from "../tools/SelectActiveIntentTool"
+import { spawnSubIntentTool } from "../tools/SpawnSubIntentTool"
 import { HookEngine } from "../../hooks/HookEngine"
 
 import { formatResponse } from "../prompts/responses"
@@ -403,6 +404,8 @@ export async function presentAssistantMessage(cline: Task) {
 						return `[${block.name} for '${block.params.path}']`
 					case "select_active_intent":
 						return `[${block.name} for '${block.params.intent_id}']`
+					case "spawn_sub_intent":
+						return `[${block.name}: '${block.params.id}' under '${block.params.parent_id}']`
 					default:
 						return `[${block.name}]`
 				}
@@ -901,6 +904,20 @@ export async function presentAssistantMessage(cline: Task) {
 				case "generate_image":
 					await checkpointSaveAndMark(cline)
 					await generateImageTool.handle(cline, block as ToolUse<"generate_image">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+					})
+					break
+				case "select_active_intent":
+					await selectActiveIntentTool.handle(cline, block as ToolUse<"select_active_intent">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+					})
+					break
+				case "spawn_sub_intent":
+					await spawnSubIntentTool.handle(cline, block as ToolUse<"spawn_sub_intent">, {
 						askApproval,
 						handleError,
 						pushToolResult,
