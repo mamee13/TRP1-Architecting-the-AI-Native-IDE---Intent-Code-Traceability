@@ -32,8 +32,19 @@ export default {
 					type: "string",
 					description: CONTENT_PARAMETER_DESCRIPTION,
 				},
+				intent_id: {
+					type: "string",
+					description:
+						"The ID of the active intent this mutation belongs to. Must match the current active intent.",
+				},
+				mutation_class: {
+					type: "string",
+					enum: ["EVOLUTION", "REFACTOR", "FIX", "DOCS"],
+					description:
+						"The classification of this change. EVOLUTION: New features/logic. REFACTOR: Structural changes without logic change. FIX: Bug fixes. DOCS: Documentation only.",
+				},
 			},
-			required: ["path", "content"],
+			required: ["path", "content", "intent_id", "mutation_class"],
 			additionalProperties: false,
 		},
 	},

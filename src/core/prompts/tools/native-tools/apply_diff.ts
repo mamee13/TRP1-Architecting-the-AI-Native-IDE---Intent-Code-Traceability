@@ -27,8 +27,17 @@ export const apply_diff = {
 					type: "string",
 					description: DIFF_PARAMETER_DESCRIPTION,
 				},
+				intent_id: {
+					type: "string",
+					description: "The ID of the active intent this mutation belongs to.",
+				},
+				mutation_class: {
+					type: "string",
+					enum: ["EVOLUTION", "REFACTOR", "FIX", "DOCS"],
+					description: "The classification of this change.",
+				},
 			},
-			required: ["path", "diff"],
+			required: ["path", "diff", "intent_id", "mutation_class"],
 			additionalProperties: false,
 		},
 	},

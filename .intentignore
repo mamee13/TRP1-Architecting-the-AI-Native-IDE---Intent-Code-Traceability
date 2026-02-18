@@ -1,0 +1,8 @@
+# Governance Ignore File
+# Paths listed here cannot be modified by the AI regardless of intent scope.
+
+.env
+.vscode/*
+node_modules/*
+.git/*
+.orchestration/agent_trace.jsonl
