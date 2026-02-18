@@ -127,6 +127,14 @@ export type NativeToolArgs = {
 		intent_id: string
 		mutation_class: "EVOLUTION" | "REFACTOR" | "FIX" | "DOCS"
 	}
+	spawn_sub_intent: {
+		id: string
+		description: string
+		scope: string[]
+		parent_id: string
+		constraints?: string[]
+		acceptance_criteria?: string[]
+	}
 	// Add more tools as they are migrated to native protocol
 }
 
@@ -302,6 +310,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	generate_image: "generate images",
 	custom_tool: "use custom tools",
 	select_active_intent: "select active intent",
+	spawn_sub_intent: "spawn sub-intent",
 } as const
 
 // Define available tool groups.
@@ -335,6 +344,7 @@ export const ALWAYS_AVAILABLE_TOOLS: ToolName[] = [
 	"run_slash_command",
 	"skill",
 	"select_active_intent",
+	"spawn_sub_intent",
 ] as const
 
 /**

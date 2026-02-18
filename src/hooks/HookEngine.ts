@@ -23,6 +23,7 @@ export class HookEngine {
 	private static instance: HookEngine
 	private lastReadHashes: Map<string, string> = new Map()
 	private lastStructuralHashes: Map<string, string> = new Map()
+	private stateFilePath: string | null = null
 
 	private static readonly MUTATING_TOOLS: ToolName[] = [
 		"write_to_file",
@@ -44,6 +45,45 @@ export class HookEngine {
 			HookEngine.instance = new HookEngine()
 		}
 		return HookEngine.instance
+	}
+
+	/**
+	 * Initializes persistent state from disk.
+	 * Call this once when a task starts to restore hash state across restarts.
+	 */
+	public async loadState(cwd: string): Promise<void> {
+		this.stateFilePath = path.join(cwd, ".orchestration", "hook_state.json")
+		try {
+			const raw = await fs.readFile(this.stateFilePath, "utf-8")
+			const state = JSON.parse(raw)
+			if (state.readHashes) {
+				this.lastReadHashes = new Map(Object.entries(state.readHashes))
+			}
+			if (state.structuralHashes) {
+				this.lastStructuralHashes = new Map(Object.entries(state.structuralHashes))
+			}
+			console.log(`[ORCHESTRATION] Loaded ${this.lastReadHashes.size} read hashes from persistent state.`)
+		} catch {
+			// No state file yet — start fresh
+		}
+	}
+
+	/**
+	 * Persists current hash state to disk.
+	 * Called after any hash update to ensure state survives restarts.
+	 */
+	private async saveState(): Promise<void> {
+		if (!this.stateFilePath) return
+		try {
+			const state = {
+				readHashes: Object.fromEntries(this.lastReadHashes),
+				structuralHashes: Object.fromEntries(this.lastStructuralHashes),
+				updatedAt: new Date().toISOString(),
+			}
+			await fs.writeFile(this.stateFilePath, JSON.stringify(state, null, 2), "utf-8")
+		} catch (e) {
+			console.warn("[ORCHESTRATION] Failed to persist hook state:", e)
+		}
 	}
 
 	/**
@@ -156,13 +196,15 @@ export class HookEngine {
 			}
 		}
 
-		// 7. Context Compaction (Master Thinker)
+		// 7. Context Compaction Hook (Master Thinker)
 		const MESSAGE_LIMIT = 40
 		if (task.clineMessages.length > MESSAGE_LIMIT) {
-			console.log(`[GOVERNANCE] Context Rot Detected: ${task.clineMessages.length} messages. Forcing compaction.`)
+			console.warn(
+				`[GOVERNANCE] Context Rot Detected: ${task.clineMessages.length} messages. Suggesting compaction.`,
+			)
 			return {
-				allow: false,
-				reason: `> [!STOP]\n> **Context Rot Mitigation.** Your conversation history is currently at ${task.clineMessages.length} messages. This exceeds the project's signal-to-noise threshold. \n> **Required Action:** You must summarize the current progress and architectural state into \`CLAUDE.md\` or \`AGENT.md\`, then start a new task session to reset context.`,
+				allow: true,
+				reason: `> [!WARNING]\n> **Context Rot Detection.** Your conversation history is currently at ${task.clineMessages.length} messages. To preserve signal-to-noise ratio, please consider summarizing progress into \`CLAUDE.md\` and starting a new task soon.`,
 			}
 		}
 
@@ -221,6 +263,8 @@ export class HookEngine {
 				const hash = generateHash(content)
 				this.lastReadHashes.set(absolutePath, hash)
 				console.log(`[ORCHESTRATION] Updated Read Hash for ${params.path}: ${hash.substring(0, 7)}`)
+				// Persist state so it survives extension host restarts
+				void this.saveState()
 			} catch (e) {
 				console.log(`[ORCHESTRATION] Failed to update read hash for ${params.path}`)
 			}
@@ -232,109 +276,125 @@ export class HookEngine {
 			const hash = generateHash(content)
 			this.lastReadHashes.set(absolutePath, hash)
 
-			const structuralHash = generateStructuralHash(content)
+			const structuralHash = generateStructuralHash(content, absolutePath)
 			this.lastStructuralHashes.set(absolutePath, structuralHash)
 
 			console.log(`[ORCHESTRATION] Updated Write Hash for ${params.path}: ${hash.substring(0, 7)}`)
 			console.log(`[AST] Updated Structural Hash for ${params.path}: ${structuralHash.substring(0, 7)}`)
+			// Persist state so it survives extension host restarts
+			void this.saveState()
 		}
 
 		// 2. Generate Agent Trace (Phase 3 & Day 3)
+		// Non-Blocking Optimization: Do not await trace generation
 		if ((toolName === "write_to_file" || toolName === "apply_diff") && !result?.isError) {
-			try {
-				console.log(`[TRACE] Generating transformation record for ${params.path || params.file_path}...`)
-				const orchestrationDir = path.join(task.cwd, ".orchestration")
-				// Ensure directory exists (Phase 4 Robustness)
-				await fs.mkdir(orchestrationDir, { recursive: true })
-
-				const traceFile = path.join(orchestrationDir, "agent_trace.jsonl")
-				console.log(`[TRACE] Logging transformation to ${traceFile}`)
-
-				let contentHash = ""
-				if (params.path) {
-					const absolutePath = path.resolve(task.cwd, params.path)
-					const content = await fs.readFile(absolutePath, "utf-8").catch(() => "")
-					contentHash = generateHash(content)
-				}
-
-				const trace = {
-					id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-					timestamp: new Date().toISOString(),
-					vcs: { revision_id: "local" }, // Placeholder for git SHA
-					files: [
-						{
-							relative_path: params.path || params.file_path,
-							conversations: [
-								{
-									url: task.taskId || "local-session",
-									contributor: {
-										entity_type: "AI",
-										model_identifier: "assistant",
-									},
-									ranges: [
-										{
-											start_line: 1, // Full file or diff range
-											end_line: contentHash ? 0 : 0, // Simplified for now
-											content_hash: `sha256:${contentHash}`,
-										},
-									],
-									related: [
-										{
-											type: "specification",
-											value: params.intent_id || intentId,
-										},
-										{
-											type: "mutation_class",
-											value: await this.classifyMutation(
-												task.cwd,
-												params.path || params.file_path,
-											),
-										},
-										{
-											type: "structural_hash",
-											value: `sha256:${generateStructuralHash(
-												await fs
-													.readFile(path.resolve(task.cwd, params.path || ""), "utf-8")
-													.catch(() => ""),
-											)}`,
-										},
-									],
-								},
-							],
-						},
-					],
-					status: "success",
-					toolName, // Metadata
-				}
-
-				await fs.appendFile(traceFile, JSON.stringify(trace) + "\n")
-				console.log(`[TRACE] => agent_trace.jsonl updated (${trace.id.substring(0, 8)})`)
-
-				// Also update intent_map.md (Day 3 requirement)
-				await this.updateIntentMap(task.cwd, trace)
-				console.log(`[TRACE] => intent_map.md updated (Spatial Map)`)
-
-				// 3. Context Compaction Hook (Phase 4)
-				const MESSAGE_THRESHOLD = 50
-				if (task.clineMessages.length > MESSAGE_THRESHOLD) {
-					console.warn(
-						`[GOVERNANCE] !!! CONTEXT ROT DETECTED !!!: ${task.clineMessages.length} messages. Consider summarization to preserve signal-to-noise ratio.`,
+			// Fire and forget - the trace is important but shouldn't block the next agent step
+			void (async () => {
+				try {
+					console.log(
+						`[TRACE] [ASYNC] Generating transformation record for ${params.path || params.file_path}...`,
 					)
+					const orchestrationDir = path.join(task.cwd, ".orchestration")
+					await fs.mkdir(orchestrationDir, { recursive: true })
+
+					const traceFile = path.join(orchestrationDir, "agent_trace.jsonl")
+
+					// Optimization: Use provided result or params if they contain the full content
+					// to avoid redundant fs.readFile after a write
+					let contentHash = ""
+					let content = ""
+					if (toolName === "write_to_file" && params.content) {
+						content = params.content
+						contentHash = generateHash(content)
+					} else if (params.path) {
+						const absolutePath = path.resolve(task.cwd, params.path)
+						content = await fs.readFile(absolutePath, "utf-8").catch(() => "")
+						contentHash = generateHash(content)
+					}
+
+					const trace = {
+						id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
+						timestamp: new Date().toISOString(),
+						vcs: { revision_id: "local" }, // Placeholder for git SHA
+						files: [
+							{
+								relative_path: params.path || params.file_path,
+								conversations: [
+									{
+										url: task.taskId || "local-session",
+										contributor: {
+											entity_type: "AI",
+											model_identifier: "assistant",
+										},
+										ranges: [
+											{
+												start_line: 1, // Full file or diff range
+												end_line: contentHash ? 0 : 0, // Simplified for now
+												content_hash: `sha256:${contentHash}`,
+											},
+										],
+										related: [
+											{
+												type: "specification",
+												value: params.intent_id || intentId,
+											},
+											{
+												type: "mutation_class",
+												value: await this.classifyMutation(
+													task.cwd,
+													params.path || params.file_path,
+													content, // Optimization: Pass content to avoid another read
+												),
+											},
+											{
+												type: "structural_hash",
+												value: `sha256:${generateStructuralHash(
+													content,
+													params.path ? path.resolve(task.cwd, params.path) : undefined,
+												)}`,
+											},
+										],
+									},
+								],
+							},
+						],
+						status: "success",
+						toolName, // Metadata
+					}
+
+					await fs.appendFile(traceFile, JSON.stringify(trace) + "\n")
+					console.log(`[TRACE] [ASYNC] => agent_trace.jsonl updated (${trace.id.substring(0, 8)})`)
+
+					// Also update intent_map.md (Day 3 requirement)
+					await this.updateIntentMap(task.cwd, trace)
+					console.log(`[TRACE] [ASYNC] => intent_map.md updated (Spatial Map)`)
+
+					// 3. Context Compaction Hook (Phase 4)
+					const MESSAGE_THRESHOLD = 50
+					if (task.clineMessages.length > MESSAGE_THRESHOLD) {
+						console.warn(
+							`[GOVERNANCE] !!! CONTEXT ROT DETECTED !!!: ${task.clineMessages.length} messages. Consider summarization to preserve signal-to-noise ratio.`,
+						)
+					}
+				} catch (error) {
+					console.error("[TRACE] [ASYNC] Failed to generate agent trace:", error)
 				}
-			} catch (error) {
-				console.error("Failed to generate agent trace:", error)
-			}
+			})()
 		}
 	}
 
-	private async classifyMutation(taskCwd: string, filePath: string | undefined): Promise<string> {
+	private async classifyMutation(
+		taskCwd: string,
+		filePath: string | undefined,
+		currentContent?: string,
+	): Promise<string> {
 		if (!filePath) return "UNKNOWN"
 		const absolutePath = path.resolve(taskCwd, filePath)
 		const prevHash = this.lastStructuralHashes.get(absolutePath)
 
 		try {
-			const currentContent = await fs.readFile(absolutePath, "utf-8")
-			const currentHash = generateStructuralHash(currentContent)
+			const content = currentContent ?? (await fs.readFile(absolutePath, "utf-8"))
+			const currentHash = generateStructuralHash(content, absolutePath)
 
 			if (prevHash && currentHash === prevHash) {
 				console.log(`[AST] Structural match detected for ${filePath} - Auto-classifying as AST_REFACTOR`)

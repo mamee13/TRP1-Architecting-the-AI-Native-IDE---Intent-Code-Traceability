@@ -6,6 +6,54 @@ This document provides a comprehensive architectural analysis of the Roo Code ex
 
 ---
 
+## System Architecture Overview
+
+```mermaid
+graph TD
+    subgraph VS_Code["VS Code Environment"]
+        subgraph Webview["Webview (React) — Restricted Presentation Layer"]
+            UI["Chat UI / Diff View"]
+        end
+
+        subgraph ExtHost["Extension Host (Node.js) — Privileged Logic Layer"]
+            Task["Task.ts\n(Orchestrator)"]
+            PAM["presentAssistantMessage.ts\n(Message Processor)"]
+            PromptBuilder["system.ts\n(Prompt Builder)"]
+            ToolRegistry["src/core/tools/\n(Tool Registry)"]
+
+            subgraph HookLayer["Hook Engine — Middleware Boundary"]
+                HookEngine["HookEngine.ts\n(Singleton)"]
+                PreHook["onPreExecute()\nGatekeeper"]
+                PostHook["onPostExecute()\nTraceability"]
+            end
+
+            subgraph Orchestration[".orchestration/ — Sidecar Storage"]
+                Intents["active_intents.json"]
+                TraceLog["agent_trace.jsonl"]
+                IntentMap["intent_map.md"]
+                SharedBrain["CLAUDE.md\n(Shared Brain)"]
+            end
+        end
+    end
+
+    subgraph LLM["LLM Provider (Anthropic / OpenAI)"]
+        API["Streaming API"]
+    end
+
+    UI -- "postMessage IPC" --> Task
+    Task -- "API Request" --> API
+    API -- "Stream Response" --> PAM
+    PAM -- "Intercept" --> PreHook
+    PreHook -- "Allow / Block" --> ToolRegistry
+    ToolRegistry -- "Result" --> PostHook
+    PostHook -- "Append Trace" --> TraceLog
+    PostHook -- "Update Map" --> IntentMap
+    PreHook -- "Load Context" --> Intents
+    PromptBuilder -- "Inject intent_context" --> Task
+```
+
+---
+
 ## 1. Archaeological Findings (Phase 0)
 
 ### 1.1 Core Execution Loop
@@ -105,19 +153,34 @@ export class HookEngine {
 
 **Solution:** Mandatory tool call sequence:
 
-```
-State 1: User Request
-  ↓
-State 2: Reasoning Intercept
-  → Agent calls select_active_intent(intent_id)
-  → Pre-Hook intercepts
-  → Loads intent context from .orchestration/active_intents.json
-  → Injects <intent_context> into prompt
-  → Resumes execution
-  ↓
-State 3: Contextualized Action
-  → Agent calls write_to_file with full context
-  → Post-Hook logs trace with content_hash
+```mermaid
+flowchart TD
+    A["User Prompt"] --> B["Task.recursivelyMakeClineRequests()"]
+    B --> C["LLM API Call"]
+    C --> D["Stream Response"]
+    D --> E["presentAssistantMessage()"]
+    E --> F{"Tool Call Detected?"}
+    F -- No --> G["Display Text to User"]
+    F -- Yes --> H["onPreExecute — HookEngine"]
+
+    H --> I{"Intent ID set?"}
+    I -- No, tool != select_active_intent --> J["BLOCK: Return Error to LLM\n'You MUST call select_active_intent first'"]
+    I -- Yes OR tool == select_active_intent --> K{"Scope Valid?"}
+
+    K -- No --> L["BLOCK: Scope Violation Error"]
+    K -- Yes --> M{"Destructive Command?"}
+
+    M -- Yes --> N["HITL Modal\nvscode.window.showWarningMessage"]
+    N -- Rejected --> O["BLOCK: Return Rejection to LLM"]
+    N -- Approved --> P["Execute Tool"]
+    M -- No --> P
+
+    P --> Q["onPostExecute — HookEngine"]
+    Q --> R["Compute content_hash"]
+    R --> S["Append to agent_trace.jsonl"]
+    S --> T["Update intent_map.md"]
+    T --> U["Return Result to LLM"]
+    U --> B
 ```
 
 **Enforcement Mechanism:**
@@ -298,6 +361,45 @@ const [modesSection, skillsSection, intentSection] = await Promise.all([
 		}
 	]
 }
+```
+
+**Schema Diagram:**
+
+```mermaid
+erDiagram
+    TRACE_RECORD {
+        string id "UUIDv7 — unique trace ID"
+        string timestamp "ISO 8601 — when action occurred"
+    }
+    VCS {
+        string revision_id "Git commit SHA"
+    }
+    FILE_ENTRY {
+        string relative_path "Path relative to workspace root"
+    }
+    CONVERSATION {
+        string url "Session identifier"
+    }
+    CONTRIBUTOR {
+        string entity_type "AI or Human"
+        string model_identifier "e.g. anthropic/claude-3-5-sonnet"
+    }
+    CODE_RANGE {
+        int start_line "First line of modified block"
+        int end_line "Last line of modified block"
+        string content_hash "SHA-256 of code block"
+    }
+    RELATED_REF {
+        string type "specification | issue | pr"
+        string value "e.g. INT-001 — the golden thread"
+    }
+
+    TRACE_RECORD ||--|| VCS : "anchors to"
+    TRACE_RECORD ||--|{ FILE_ENTRY : "mutates"
+    FILE_ENTRY ||--|{ CONVERSATION : "within"
+    CONVERSATION ||--|| CONTRIBUTOR : "authored by"
+    CONVERSATION ||--|{ CODE_RANGE : "covers"
+    CONVERSATION ||--|{ RELATED_REF : "links to"
 ```
 
 **Key Properties:**
@@ -483,72 +585,61 @@ public async onPostExecute(context: HookContext, result: any): Promise<void> {
 }
 ```
 
-### 7.3 Semantic Classification
+### 7.3 Semantic Classification (AST Proofs)
+
+**Detection Logic (src/utils/ast.ts):**
+To distinguish between feature addition and pure refactoring, we use structural hashing:
+
+1.  **Parse**: Convert code to AST using TypeScript parser.
+2.  **Strip**: Remove identifiers, literals, and comments.
+3.  **Hash**: Create a SHA-256 signature of the remaining SyntaxKind sequence.
+
+```typescript
+export function generateStructuralHash(code: string): string {
+	const sourceFile = ts.createSourceFile("temp.ts", code, ts.ScriptTarget.Latest, true)
+	const kinds: number[] = []
+	function visit(node: ts.Node) {
+		kinds.push(node.kind)
+		ts.forEachChild(node, visit)
+	}
+	visit(sourceFile)
+	return crypto.createHash("sha256").update(kinds.join(",")).digest("hex")
+}
+```
 
 **Mutation Types:**
 
-- `AST_REFACTOR`: Syntax change, same intent
-- `INTENT_EVOLUTION`: New feature addition
-- `BUG_FIX`: Corrective action
-- `DOCUMENTATION`: Non-functional change
-
-**Detection Logic:**
-
-```typescript
-function classifyMutation(oldContent: string, newContent: string, intentId: string): MutationType {
-	// Use AST diff analysis
-	const oldAST = parseToAST(oldContent)
-	const newAST = parseToAST(newContent)
-
-	if (structurallyEquivalent(oldAST, newAST)) {
-		return "AST_REFACTOR"
-	}
-
-	if (hasNewExports(oldAST, newAST)) {
-		return "INTENT_EVOLUTION"
-	}
-
-	return "BUG_FIX"
-}
-```
+- `AST_REFACTOR`: Pre-mutation Hash == Post-mutation Hash. The "logic" is identical; only names/formatting changed.
+- `EVOLUTION`: Structural hashes differ. Intent has evolved or logic has changed.
 
 ---
 
-## 8. Concurrency & Multi-Agent Orchestration
+## 8. Orchestration: Hierarchical Supervision
 
-### 8.1 Optimistic Locking Strategy
+### 8.1 Manager-Worker Pattern (Hierarchical Supervision)
 
-**Problem:** Multiple agents editing the same file simultaneously.
+**Pattern**: Direct delegation of sub-tasks via nested intents.
 
-**Solution:**
+1.  **Architect/Manager**: Receives high-level user request.
+2.  **Delegation**: Calls `spawn_sub_intent` to create granular child intents with unique scopes and constraints.
+3.  **Worker execution**: Sequential or parallel workers execute sub-intents.
+4.  **Verification**: Manager verifies sub-task completion against acceptance criteria.
+
+### 8.2 SpawnSubIntentTool (`src/core/tools/SpawnSubIntentTool.ts`)
+
+Allows agents to programmatically extend the intent ledger:
 
 ```typescript
-private async checkOptimisticLock(
-  filePath: string,
-  expectedHash: string
-): Promise<boolean> {
-  const currentContent = await fs.readFile(filePath, "utf-8")
-  const currentHash = computeContentHash(currentContent)
-  return currentHash === expectedHash
+// input params
+{
+  id: "INT-001-A",
+  description: "Implement JWT validation logic",
+  parent_id: "INT-001",
+  scope: ["src/auth/jwt-validator.ts"]
 }
 ```
 
-**Pre-Hook Integration:**
-
-```typescript
-if (toolName === "write_to_file") {
-	const isStale = !(await this.checkOptimisticLock(params.path, task.fileHashes[params.path]))
-
-	if (isStale) {
-		return {
-			allow: false,
-			reason: "File modified by another agent. Re-read and retry.",
-		}
-	}
-}
-```
-
-### 8.2 Shared Brain (CLAUDE.md)
+### 8.3 Shared Brain (CLAUDE.md)
 
 **Purpose:** Cross-session knowledge persistence
 
@@ -607,14 +698,20 @@ private async checkIntentIgnore(
 }
 ```
 
-### 9.2 Context Rot Mitigation
+### 9.2 Context Rot Mitigation (Active Context Compaction)
 
-**PreCompact Hook:**
+**Hook Mechanism**: Hard enforcement of history management.
+
+- **Trigger**: `task.clineMessages.length > 40`
+- **Action**: Blocking Pre-Hook response.
+- **Protocol**: Forces the agent to summarize state into `CLAUDE.md`, providing a "Checkpointed Brain" before resetting the session. This prevents hallucination and context decay.
 
 ```typescript
-if (task.conversationHistory.length > 50) {
-	const summary = await summarizeHistory(task.conversationHistory)
-	task.conversationHistory = [summary, ...task.conversationHistory.slice(-10)]
+if (task.clineMessages.length > 40) {
+	return {
+		allow: false,
+		reason: "> [!STOP]\n> **Context Rot Mitigation.** ... Required Action: Summarize progress and restart.",
+	}
 }
 ```
 
@@ -631,36 +728,7 @@ if (task.consecutiveToolFailures > 5) {
 
 ---
 
-## 10. Evaluation Metrics Achieved
-
-| Criterion                  | Score | Evidence                                                           |
-| -------------------------- | ----- | ------------------------------------------------------------------ |
-| **Intent-AST Correlation** | 5/5   | agent_trace.jsonl with content_hash and intent_id linkage          |
-| **Context Engineering**    | 5/5   | Dynamic <intent_context> injection via getIntentContextSection()   |
-| **Hook Architecture**      | 5/5   | Clean Middleware pattern; HookEngine singleton with Pre/Post hooks |
-| **Orchestration**          | 4/5   | Optimistic locking implemented; CLAUDE.md pending full integration |
-
----
-
-## 11. Known Limitations & Future Work
-
-### 11.1 Current Gaps
-
-1. **AST-Aware Patching:** Currently uses line-based diffs; needs tree-sitter integration
-2. **Multi-Agent Supervisor:** No hierarchical orchestration yet
-3. **Trace Querying:** No UI for browsing agent_trace.jsonl
-4. **Intent Language:** Using simple JSON; could adopt formal spec (AISpec)
-
-### 11.2 Phase 4 Priorities
-
-1. Implement AST diff analysis for semantic classification
-2. Build Supervisor agent pattern for parallel task delegation
-3. Create Trace Viewer webview panel
-4. Integrate with GitHub SpecKit for formal requirements
-
----
-
-## 12. References & Prior Art
+## 10. References & Prior Art
 
 - **Agent Trace Spec:** https://agent-trace.dev/
 - **GitHub SpecKit:** https://github.com/github/spec-kit
@@ -672,19 +740,22 @@ if (task.consecutiveToolFailures > 5) {
 
 ## Appendix A: File Modification Log
 
-| File                                                    | Type     | Purpose                         |
-| ------------------------------------------------------- | -------- | ------------------------------- |
-| `src/hooks/HookEngine.ts`                               | NEW      | Core middleware engine          |
-| `src/core/tools/SelectActiveIntentTool.ts`              | NEW      | Intent checkout tool            |
-| `src/core/prompts/sections/intent-context.ts`           | NEW      | Context injection               |
-| `src/core/prompts/system.ts`                            | MODIFIED | Added getIntentContextSection() |
-| `src/core/assistant-message/presentAssistantMessage.ts` | MODIFIED | Hook interception points        |
-| `src/core/task/Task.ts`                                 | MODIFIED | Added activeIntentId property   |
-| `.orchestration/active_intents.json`                    | NEW      | Intent specifications           |
-| `.orchestration/agent_trace.jsonl`                      | NEW      | Trace ledger                    |
+| File                                                    | Type     | Purpose                                            |
+| ------------------------------------------------------- | -------- | -------------------------------------------------- |
+| `src/hooks/HookEngine.ts`                               | MODIFIED | Integrated AST proofs & Context Compaction trigger |
+| `src/core/tools/SelectActiveIntentTool.ts`              | NEW      | Intent checkout tool                               |
+| `src/core/tools/SpawnSubIntentTool.ts`                  | NEW      | Hierarchical delegation tool                       |
+| `src/core/prompts/sections/intent-context.ts`           | NEW      | Context injection                                  |
+| `src/core/prompts/system.ts`                            | MODIFIED | Added getIntentContextSection()                    |
+| `src/core/assistant-message/presentAssistantMessage.ts` | MODIFIED | Hook interception & Tool execution registry        |
+| `src/core/task/Task.ts`                                 | MODIFIED | Added activeIntentId property                      |
+| `src/utils/ast.ts`                                      | NEW      | Structural hashing logic for semantic proofs       |
+| `.orchestration/active_intents.json`                    | NEW      | Intent specifications                              |
+| `.orchestration/agent_trace.jsonl`                      | NEW      | Trace ledger                                       |
 
 ---
 
-**Document Version:** 1.1 (Finalized Technical Phases)  
-**Last Updated:** 2026-02-17  
-**Status:** Phase 4 Complete, Finalizing Saturday reports
+---
+
+**Document Version:** 1.2  
+**Last Updated:** 2026-02-18

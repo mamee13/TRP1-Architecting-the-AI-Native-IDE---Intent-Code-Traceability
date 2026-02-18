@@ -20,10 +20,37 @@ export class SpawnSubIntentTool extends BaseTool<"spawn_sub_intent"> {
 		const { id, description, scope, parent_id, constraints, acceptance_criteria } = params
 		const { pushToolResult, handleError } = callbacks
 
-		try {
-			const orchestrationDir = path.join(task.cwd, ".orchestration")
-			const intentsFile = path.join(orchestrationDir, "active_intents.json")
+		const orchestrationDir = path.join(task.cwd, ".orchestration")
+		const intentsFile = path.join(orchestrationDir, "active_intents.json")
+		const lockFile = path.join(orchestrationDir, "active_intents.lock")
 
+		// 1. Acquire Lock (Simple retry-based advisory lock)
+		let acquired = false
+		const maxRetries = 10
+		const retryDelay = 100
+
+		for (let i = 0; i < maxRetries; i++) {
+			try {
+				// Use 'wx' flag to fail if the lock file already exists (atomic creation)
+				const handle = await fs.open(lockFile, "wx")
+				await handle.close()
+				acquired = true
+				break
+			} catch (e: any) {
+				if (e.code === "EEXIST") {
+					await new Promise((resolve) => setTimeout(resolve, retryDelay))
+				} else {
+					throw e
+				}
+			}
+		}
+
+		if (!acquired) {
+			pushToolResult(`Error: Could not acquire lock for orchestration ledger. Please try again.`)
+			return
+		}
+
+		try {
 			let data: any = { intents: [] }
 			try {
 				const fileContent = await fs.readFile(intentsFile, "utf-8")
@@ -32,14 +59,13 @@ export class SpawnSubIntentTool extends BaseTool<"spawn_sub_intent"> {
 				// Initialize if file doesn't exist
 			}
 
-			// Check if intent already exists
+			// 2. Business Logic Checks
 			if (data.intents.some((i: any) => i.id === id)) {
 				pushToolResult(`Error: Intent ID '${id}' already exists.`)
 				return
 			}
 
-			// Validate parent exists
-			if (!data.intents.some((i: any) => i.id === parent_id)) {
+			if (parent_id !== "root" && !data.intents.some((i: any) => i.id === parent_id)) {
 				pushToolResult(`Error: Parent Intent ID '${parent_id}' not found.`)
 				return
 			}
@@ -56,6 +82,8 @@ export class SpawnSubIntentTool extends BaseTool<"spawn_sub_intent"> {
 			}
 
 			data.intents.push(newIntent)
+
+			// 3. Atomic Write
 			await fs.writeFile(intentsFile, JSON.stringify(data, null, 2), "utf-8")
 
 			pushToolResult(
@@ -63,6 +91,9 @@ export class SpawnSubIntentTool extends BaseTool<"spawn_sub_intent"> {
 			)
 		} catch (error) {
 			await handleError("spawning sub-intent", error as Error)
+		} finally {
+			// 4. Release Lock
+			await fs.unlink(lockFile).catch(() => {})
 		}
 	}
 }
