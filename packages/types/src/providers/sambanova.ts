@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 // https://docs.sambanova.ai/cloud/docs/get-started/supported-models
 export type SambaNovaModelId =

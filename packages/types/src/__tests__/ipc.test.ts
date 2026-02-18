@@ -1,4 +1,4 @@
-import { TaskCommandName, taskCommandSchema } from "../ipc"
+import { TaskCommandName, taskCommandSchema } from "../ipc.js"
 
 describe("IPC Types", () => {
 	describe("TaskCommandName", () => {

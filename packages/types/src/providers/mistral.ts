@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 // https://docs.mistral.ai/getting-started/models/models_overview/
 export type MistralModelId = keyof typeof mistralModels

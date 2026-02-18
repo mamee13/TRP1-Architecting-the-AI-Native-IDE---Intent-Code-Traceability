@@ -3,8 +3,8 @@ import {
 	type CustomToolContext,
 	defineCustomTool,
 	parametersSchema as z,
-} from "../custom-tool"
-import type { TaskLike } from "../task"
+} from "../custom-tool.js"
+import type { TaskLike } from "../task.js"
 
 describe("custom-tool utilities", () => {
 	describe("z (Zod re-export)", () => {

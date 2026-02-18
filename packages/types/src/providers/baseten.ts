@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 // Baseten
 // https://baseten.co/products/model-apis/

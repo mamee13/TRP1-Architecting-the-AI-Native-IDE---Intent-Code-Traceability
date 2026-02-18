@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 // https://openai.com/api/pricing/
 export type OpenAiNativeModelId = keyof typeof openAiNativeModels

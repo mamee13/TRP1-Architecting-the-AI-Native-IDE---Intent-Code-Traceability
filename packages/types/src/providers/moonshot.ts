@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 // https://platform.moonshot.ai/
 export type MoonshotModelId = keyof typeof moonshotModels

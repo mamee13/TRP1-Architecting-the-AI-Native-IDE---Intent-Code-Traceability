@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 export const LMSTUDIO_DEFAULT_TEMPERATURE = 0
 

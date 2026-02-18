@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 export type FireworksModelId =
 	| "accounts/fireworks/models/kimi-k2-instruct"

@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 // https://docs.anthropic.com/en/docs/about-claude/models
 // https://platform.claude.com/docs/en/about-claude/pricing

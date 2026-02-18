@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 // https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html
 

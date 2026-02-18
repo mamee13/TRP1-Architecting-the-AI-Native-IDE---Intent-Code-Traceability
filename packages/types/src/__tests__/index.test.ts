@@ -1,6 +1,6 @@
 // npx vitest run src/__tests__/index.test.ts
 
-import { GLOBAL_STATE_KEYS } from "../index"
+import { GLOBAL_STATE_KEYS } from "../index.js"
 
 describe("GLOBAL_STATE_KEYS", () => {
 	it("should contain provider settings keys", () => {

@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 // Minimax
 // https://platform.minimax.io/docs/guides/pricing

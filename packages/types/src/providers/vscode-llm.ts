@@ -1,4 +1,4 @@
-import type { ModelInfo } from "../model"
+import type { ModelInfo } from "../model.js"
 
 export type VscodeLlmModelId = keyof typeof vscodeLlmModels
 
