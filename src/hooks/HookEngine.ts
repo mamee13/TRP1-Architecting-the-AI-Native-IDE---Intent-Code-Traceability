@@ -2,6 +2,7 @@ import * as vscode from "vscode"
 import * as path from "path"
 import * as fs from "fs/promises"
 import * as crypto from "crypto"
+import * as yaml from "yaml"
 import { Task } from "../core/task/Task"
 import { ToolName } from "@roo-code/types"
 import { generateHash } from "../utils/crypto"
@@ -453,16 +454,16 @@ export class HookEngine {
 
 		try {
 			const orchestrationDir = path.join(cwd, ".orchestration")
-			const intentsFile = path.join(orchestrationDir, "active_intents.json")
+			const intentsFile = path.join(orchestrationDir, "active_intents.yaml")
 			const fileContent = await fs.readFile(intentsFile, "utf-8")
-			const data = JSON.parse(fileContent)
-			const intent = data?.intents?.find((i: any) => i.id === intentId)
+			const data = yaml.parse(fileContent)
+			const intent = data?.active_intents?.find((i: any) => i.id === intentId)
 
 			if (!intent) {
 				return { allow: false, reason: `Intent '${intentId}' not found.` }
 			}
 
-			const scope = intent.scope || []
+			const scope = intent.owned_scope || intent.scope || []
 			if (scope.includes("*")) return { allow: true }
 
 			// Extract path from params

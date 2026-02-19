@@ -1,5 +1,6 @@
 import * as path from "path"
 import fs from "fs/promises"
+import * as yaml from "yaml"
 
 import { Task } from "../task/Task"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -17,23 +18,23 @@ export class SelectActiveIntentTool extends BaseTool<"select_active_intent"> {
 
 		try {
 			const orchestrationDir = path.join(task.cwd, ".orchestration")
-			const intentsFile = path.join(orchestrationDir, "active_intents.json")
+			const intentsFile = path.join(orchestrationDir, "active_intents.yaml")
 
 			let fileContent: string
 			try {
 				fileContent = await fs.readFile(intentsFile, "utf-8")
 			} catch (error) {
 				pushToolResult(
-					`Error: Could not find .orchestration/active_intents.json. Please ensure the orchestration layer is initialized.`,
+					`Error: Could not find .orchestration/active_intents.yaml. Please ensure the orchestration layer is initialized.`,
 				)
 				return
 			}
 
-			const data = JSON.parse(fileContent)
-			const intent = data?.intents?.find((i: any) => i.id === intent_id)
+			const data = yaml.parse(fileContent)
+			const intent = data?.active_intents?.find((i: any) => i.id === intent_id)
 
 			if (!intent) {
-				pushToolResult(`Error: Intent ID '${intent_id}' not found in .orchestration/active_intents.json.`)
+				pushToolResult(`Error: Intent ID '${intent_id}' not found in .orchestration/active_intents.yaml.`)
 				return
 			}
 
