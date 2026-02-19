@@ -127,6 +127,7 @@ export type NativeToolArgs = {
 		intent_id: string
 		mutation_class: "EVOLUTION" | "REFACTOR" | "FIX" | "DOCS"
 	}
+	select_active_intent: { intent_id: string }
 	spawn_sub_intent: {
 		id: string
 		description: string

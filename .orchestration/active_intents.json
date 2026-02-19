@@ -10,6 +10,22 @@
 				"Must follow the Interceptor Pattern for hooks."
 			],
 			"acceptance_criteria": ["select_active_intent tool is functional.", "System prompt reflects active intent."]
+		},
+		{
+			"id": "TEST-001",
+			"description": "Playground intent for testing the governed reasoning loop.",
+			"status": "IN_PROGRESS",
+			"scope": ["test/*", "README.md", "CLAUDE.md"],
+			"constraints": ["Keep changes minimal.", "Observe the Agent Trace output."],
+			"acceptance_criteria": ["Successfully edit a file in test/.", "Observe entry in agent_trace.jsonl."]
+		},
+		{
+			"id": "INTENT-002",
+			"description": "Create a JavaScript file that prints 'Hello World' to the console.",
+			"status": "active",
+			"scope": ["hello.js"],
+			"constraints": ["Use standard console.log."],
+			"acceptance_criteria": ["File 'hello.js' exists and contains console.log('Hello World')."]
 		}
 	]
 }
