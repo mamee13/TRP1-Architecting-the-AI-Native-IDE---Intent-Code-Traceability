@@ -635,6 +635,25 @@ export class NativeToolCallParser {
 					}
 				}
 				break
+			case "select_active_intent":
+				if (partialArgs.intent_id !== undefined) {
+					nativeArgs = {
+						intent_id: partialArgs.intent_id,
+					}
+				}
+				break
+			case "spawn_sub_intent":
+				if (partialArgs.id !== undefined) {
+					nativeArgs = {
+						id: partialArgs.id,
+						description: partialArgs.description,
+						scope: partialArgs.scope,
+						parent_id: partialArgs.parent_id,
+						constraints: partialArgs.constraints,
+						acceptance_criteria: partialArgs.acceptance_criteria,
+					}
+				}
+				break
 
 			default:
 				break
@@ -980,6 +999,25 @@ export class NativeToolCallParser {
 							mode: args.mode,
 							message: args.message,
 							todos: args.todos,
+						} as NativeArgsFor<TName>
+					}
+					break
+				case "select_active_intent":
+					if (args.intent_id !== undefined) {
+						nativeArgs = {
+							intent_id: args.intent_id,
+						} as NativeArgsFor<TName>
+					}
+					break
+				case "spawn_sub_intent":
+					if (args.id !== undefined) {
+						nativeArgs = {
+							id: args.id,
+							description: args.description,
+							scope: args.scope,
+							parent_id: args.parent_id,
+							constraints: args.constraints,
+							acceptance_criteria: args.acceptance_criteria,
 						} as NativeArgsFor<TName>
 					}
 					break
