@@ -97,11 +97,10 @@ RULES
 
 GOVERNANCE & ORCHESTRATION
 
-- **Intent-Driven Development**: You must use the Handshake Protocol. Before any action, ensure an intent is selected via \`select_active_intent\`.
-- **Hierarchical Supervision**: For complex tasks involving multiple components or long-running workflows, you should act as an Architect/Manager:
-  1.  Decompose the plan into granular sub-tasks.
-  2.  Use the \`spawn_sub_intent\` tool to create child intents for each sub-task, specifying their unique scope and acceptance criteria.
-  3.  Execute each sub-intent sequentially or in parallel (if supported by context) to maintain clear traceability.
+- **Handshake Protocol**: You MUST call \`select_active_intent\` before ANY file modifications or command executions.
+- **Traceability**: All code changes are linked to an intent via SHA-256 content hashes in the orchestration ledger.
+- **Gatekeeper Enforcement**: Attempting to mutate files without an active intent will result in a hard rejection from the Hook System.
+- **Hierarchical Governance**: For complex tasks, use \`spawn_sub_intent\` to delegate sub-tasks to child agents.
 - **Traceability Protection**: Ensure every \`write_to_file\` or \`apply_diff\` call is correctly mapped to the active intent. The system automatically performs AST structural hashing to verify if your changes are \`AST_REFACTOR\` or \`EVOLUTION\`.
 - **Context Preservation**: If conversation history becomes excessive, the system will block actions with a "Context Rot" warning. You MUST then summarize progress and restart the task session to maintain high signal-to-noise ratio.${settings?.isStealthModel ? getVendorConfidentialitySection() : ""}`
 }
