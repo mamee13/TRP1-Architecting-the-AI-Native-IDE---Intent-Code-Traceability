@@ -1,5 +1,6 @@
 import * as path from "path"
-import fs from "fs/promises"
+import * as fs from "fs/promises"
+import * as yaml from "yaml"
 
 import { Task } from "../task/Task"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -21,7 +22,7 @@ export class SpawnSubIntentTool extends BaseTool<"spawn_sub_intent"> {
 		const { pushToolResult, handleError } = callbacks
 
 		const orchestrationDir = path.join(task.cwd, ".orchestration")
-		const intentsFile = path.join(orchestrationDir, "active_intents.json")
+		const intentsFile = path.join(orchestrationDir, "active_intents.yaml")
 		const lockFile = path.join(orchestrationDir, "active_intents.lock")
 
 		// 1. Acquire Lock (Simple retry-based advisory lock)
@@ -51,21 +52,34 @@ export class SpawnSubIntentTool extends BaseTool<"spawn_sub_intent"> {
 		}
 
 		try {
-			let data: any = { intents: [] }
+			let data: any = []
+			let isRootList = true
+
 			try {
 				const fileContent = await fs.readFile(intentsFile, "utf-8")
-				data = JSON.parse(fileContent)
+				const parsed = yaml.parse(fileContent)
+				if (Array.isArray(parsed)) {
+					data = parsed
+					isRootList = true
+				} else if (parsed && typeof parsed === "object" && Array.isArray(parsed.active_intents)) {
+					data = parsed.active_intents
+					isRootList = false
+				} else {
+					// Fallback for unexpected format
+					data = []
+					isRootList = true
+				}
 			} catch (error) {
 				// Initialize if file doesn't exist
 			}
 
 			// 2. Business Logic Checks
-			if (data.intents.some((i: any) => i.id === id)) {
+			if (data.some((i: any) => i.id === id)) {
 				pushToolResult(`Error: Intent ID '${id}' already exists.`)
 				return
 			}
 
-			if (parent_id !== "root" && !data.intents.some((i: any) => i.id === parent_id)) {
+			if (parent_id !== "root" && !data.some((i: any) => i.id === parent_id)) {
 				pushToolResult(`Error: Parent Intent ID '${parent_id}' not found.`)
 				return
 			}
@@ -81,10 +95,11 @@ export class SpawnSubIntentTool extends BaseTool<"spawn_sub_intent"> {
 				created_at: new Date().toISOString(),
 			}
 
-			data.intents.push(newIntent)
+			data.push(newIntent)
 
 			// 3. Atomic Write
-			await fs.writeFile(intentsFile, JSON.stringify(data, null, 2), "utf-8")
+			const outputData = isRootList ? data : { active_intents: data }
+			await fs.writeFile(intentsFile, yaml.stringify(outputData), "utf-8")
 
 			pushToolResult(
 				`Success: Spawned sub-intent '${id}' under parent '${parent_id}'. The orchestration ledger has been updated.`,

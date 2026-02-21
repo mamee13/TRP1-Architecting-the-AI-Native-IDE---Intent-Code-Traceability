@@ -101,6 +101,8 @@ describe("executeCommandTool", () => {
 			},
 			nativeArgs: {
 				command: "echo test",
+				intent_id: "test-intent",
+				mutation_class: "REFACTOR",
 			},
 			partial: false,
 		}
@@ -141,7 +143,7 @@ describe("executeCommandTool", () => {
 		it("should execute a command normally", async () => {
 			// Setup
 			mockToolUse.params.command = "echo test"
-			mockToolUse.nativeArgs = { command: "echo test" }
+			mockToolUse.nativeArgs = { command: "echo test", intent_id: "test-intent", mutation_class: "REFACTOR" }
 
 			// Execute using the class-based handle method
 			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
@@ -162,7 +164,12 @@ describe("executeCommandTool", () => {
 			// Setup
 			mockToolUse.params.command = "echo test"
 			mockToolUse.params.cwd = "/custom/path"
-			mockToolUse.nativeArgs = { command: "echo test", cwd: "/custom/path" }
+			mockToolUse.nativeArgs = {
+				command: "echo test",
+				cwd: "/custom/path",
+				intent_id: "test-intent",
+				mutation_class: "REFACTOR",
+			}
 
 			// Execute
 			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
@@ -185,7 +192,7 @@ describe("executeCommandTool", () => {
 			// Setup
 			mockToolUse.params.command = undefined
 			// Native tool calls must still supply a value; simulate a missing value with an empty string.
-			mockToolUse.nativeArgs = { command: "" }
+			mockToolUse.nativeArgs = { command: "", intent_id: "test-intent", mutation_class: "REFACTOR" }
 
 			// Execute
 			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
@@ -206,7 +213,7 @@ describe("executeCommandTool", () => {
 			// Setup
 			mockToolUse.params.command = "echo test"
 			mockAskApproval.mockResolvedValue(false)
-			mockToolUse.nativeArgs = { command: "echo test" }
+			mockToolUse.nativeArgs = { command: "echo test", intent_id: "test-intent", mutation_class: "REFACTOR" }
 
 			// Execute
 			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
@@ -224,7 +231,7 @@ describe("executeCommandTool", () => {
 		it("should handle rooignore validation failures", async () => {
 			// Setup
 			mockToolUse.params.command = "cat .env"
-			mockToolUse.nativeArgs = { command: "cat .env" }
+			mockToolUse.nativeArgs = { command: "cat .env", intent_id: "test-intent", mutation_class: "REFACTOR" }
 			// Override the validateCommand mock to return a filename
 			const validateCommandMock = vitest.fn().mockReturnValue(".env")
 			mockCline.rooIgnoreController = {

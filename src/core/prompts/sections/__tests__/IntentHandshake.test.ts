@@ -25,16 +25,14 @@ describe("Intent Handshake Integration", () => {
 		})
 
 		it("should inject intent details and traces when intent is active", async () => {
-			const intents = {
-				intents: [
-					{
-						id: "INT-001",
-						description: "Test Intent",
-						scope: ["src/*"],
-						status: "active",
-					},
-				],
-			}
+			const intents = `
+active_intents:
+  - id: "INT-001"
+    description: "Test Intent"
+    owned_scope:
+      - "src/*"
+    status: "active"
+`
 			const traces = [
 				JSON.stringify({
 					timestamp: "2024-01-01T00:00:00Z",
@@ -77,7 +75,7 @@ describe("Intent Handshake Integration", () => {
 			// Mock reading intents and traces
 			vi.mocked(fs.readFile).mockImplementation((p: any) => {
 				const filePath = p.toString()
-				if (filePath.endsWith("active_intents.json")) return Promise.resolve(JSON.stringify(intents))
+				if (filePath.endsWith("active_intents.yaml")) return Promise.resolve(intents)
 				if (filePath.endsWith("agent_trace.jsonl")) return Promise.resolve(traces)
 				return Promise.resolve("")
 			})
