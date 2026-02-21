@@ -36,8 +36,17 @@ export default {
 					type: ["string", "null"],
 					description: CWD_PARAMETER_DESCRIPTION,
 				},
+				intent_id: {
+					type: "string",
+					description: "The ID of the active intent this mutation belongs to.",
+				},
+				mutation_class: {
+					type: "string",
+					enum: ["EVOLUTION", "REFACTOR", "FIX", "DOCS"],
+					description: "The classification of this change.",
+				},
 			},
-			required: ["command", "cwd"],
+			required: ["command", "cwd", "intent_id", "mutation_class"],
 			additionalProperties: false,
 		},
 	},

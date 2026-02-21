@@ -95,7 +95,12 @@ export type NativeToolArgs = {
 	read_file: import("@roo-code/types").ReadFileToolParams
 	read_command_output: { artifact_id: string; search?: string; offset?: number; limit?: number }
 	attempt_completion: { result: string }
-	execute_command: { command: string; cwd?: string }
+	execute_command: {
+		command: string
+		cwd?: string
+		intent_id: string
+		mutation_class: "EVOLUTION" | "REFACTOR" | "FIX" | "DOCS"
+	}
 	apply_diff: {
 		path: string
 		diff: string
@@ -105,8 +110,15 @@ export type NativeToolArgs = {
 	edit: { file_path: string; old_string: string; new_string: string; replace_all?: boolean }
 	search_and_replace: { file_path: string; old_string: string; new_string: string; replace_all?: boolean }
 	search_replace: { file_path: string; old_string: string; new_string: string }
-	edit_file: { file_path: string; old_string: string; new_string: string; expected_replacements?: number }
-	apply_patch: { patch: string }
+	edit_file: {
+		file_path: string
+		old_string: string
+		new_string: string
+		expected_replacements?: number
+		intent_id: string
+		mutation_class: "EVOLUTION" | "REFACTOR" | "FIX" | "DOCS"
+	}
+	apply_patch: { patch: string; intent_id: string; mutation_class: "EVOLUTION" | "REFACTOR" | "FIX" | "DOCS" }
 	list_files: { path: string; recursive?: boolean }
 	new_task: { mode: string; message: string; todos?: string }
 	ask_followup_question: {

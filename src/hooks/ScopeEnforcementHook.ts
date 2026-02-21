@@ -19,7 +19,8 @@ export class ScopeEnforcementHook implements IHook {
 			const intentsFile = path.join(orchestrationDir, "active_intents.yaml")
 			const fileContent = await fs.readFile(intentsFile, "utf-8")
 			const data = yaml.parse(fileContent)
-			const intent = data?.active_intents?.find((i: any) => i.id === intentId)
+			const intents = Array.isArray(data) ? data : data?.active_intents || []
+			const intent = intents.find((i: any) => i.id === intentId)
 
 			if (!intent) return { allow: false, reason: `Intent '${intentId}' not found.` }
 

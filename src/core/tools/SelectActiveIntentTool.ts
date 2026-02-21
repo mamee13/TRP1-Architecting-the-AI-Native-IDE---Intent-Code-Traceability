@@ -31,7 +31,8 @@ export class SelectActiveIntentTool extends BaseTool<"select_active_intent"> {
 			}
 
 			const data = yaml.parse(fileContent)
-			const intent = data?.active_intents?.find((i: any) => i.id === intent_id)
+			const intents = Array.isArray(data) ? data : data?.active_intents || []
+			const intent = intents.find((i: any) => i.id === intent_id)
 
 			if (!intent) {
 				pushToolResult(`Error: Intent ID '${intent_id}' not found in .orchestration/active_intents.yaml.`)

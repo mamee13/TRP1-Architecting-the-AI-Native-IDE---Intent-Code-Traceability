@@ -14,7 +14,8 @@ export async function getIntentContextSection(cwd: string, activeIntentId?: stri
 
 		const fileContent = await fs.readFile(intentsFile, "utf-8")
 		const data = yaml.parse(fileContent)
-		const intent = data?.active_intents?.find((i: any) => i.id === activeIntentId)
+		const intents = Array.isArray(data) ? data : data?.active_intents || []
+		const intent = intents.find((i: any) => i.id === activeIntentId)
 		if (!intent) {
 			return `> [!WARNING]
 > **Active Intent '${activeIntentId}' not found in orchestration layer.** Please re-select a valid intent.`
