@@ -51,8 +51,17 @@ const apply_patch = {
 					description:
 						"The complete patch text in the apply_patch format, starting with '*** Begin Patch' and ending with '*** End Patch'.",
 				},
+				intent_id: {
+					type: "string",
+					description: "The ID of the active intent this mutation belongs to.",
+				},
+				mutation_class: {
+					type: "string",
+					enum: ["EVOLUTION", "REFACTOR", "FIX", "DOCS"],
+					description: "The classification of this change.",
+				},
 			},
-			required: ["patch"],
+			required: ["patch", "intent_id", "mutation_class"],
 			additionalProperties: false,
 		},
 	},

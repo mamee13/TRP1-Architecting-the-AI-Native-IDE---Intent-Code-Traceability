@@ -1,5 +1,6 @@
 import * as path from "path"
 import * as fs from "fs/promises"
+import * as yaml from "yaml"
 
 export async function getIntentContextSection(cwd: string, activeIntentId?: string): Promise<string> {
 	if (!activeIntentId) {
@@ -9,11 +10,12 @@ export async function getIntentContextSection(cwd: string, activeIntentId?: stri
 
 	try {
 		const orchestrationDir = path.join(cwd, ".orchestration")
-		const intentsFile = path.join(orchestrationDir, "active_intents.json")
+		const intentsFile = path.join(orchestrationDir, "active_intents.yaml")
 
 		const fileContent = await fs.readFile(intentsFile, "utf-8")
-		const data = JSON.parse(fileContent)
-		const intent = data?.intents?.find((i: any) => i.id === activeIntentId)
+		const data = yaml.parse(fileContent)
+		const intents = Array.isArray(data) ? data : data?.active_intents || []
+		const intent = intents.find((i: any) => i.id === activeIntentId)
 		if (!intent) {
 			return `> [!WARNING]
 > **Active Intent '${activeIntentId}' not found in orchestration layer.** Please re-select a valid intent.`
@@ -56,7 +58,7 @@ export async function getIntentContextSection(cwd: string, activeIntentId?: stri
 		return `<intent_context>
 ID: ${intent.id}
 Description: ${intent.description}
-Scope: ${intent.scope?.join(", ") ?? "Not defined"}
+Scope: ${intent.owned_scope?.join(", ") ?? intent.scope?.join(", ") ?? "Not defined"}
 Constraints:
 ${intent.constraints?.map((c: string) => `- ${c}`).join("\n") ?? "None"}${traceSummary}
 </intent_context>

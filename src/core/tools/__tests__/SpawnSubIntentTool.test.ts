@@ -3,9 +3,15 @@ import { spawnSubIntentTool } from "../SpawnSubIntentTool"
 import { Task } from "../../task/Task"
 import * as fs from "fs/promises"
 import * as path from "path"
+import * as yaml from "yaml"
 
 // Mock dependencies
-vi.mock("fs/promises")
+vi.mock("fs/promises", () => ({
+	readFile: vi.fn(),
+	writeFile: vi.fn(),
+	open: vi.fn(),
+	unlink: vi.fn(),
+}))
 
 describe("SpawnSubIntentTool", () => {
 	let mockCline: any
@@ -25,11 +31,13 @@ describe("SpawnSubIntentTool", () => {
 		}
 
 		vi.mocked(fs.readFile).mockResolvedValue(
-			JSON.stringify({
-				intents: [{ id: "PARENT-01", status: "active" }],
+			yaml.stringify({
+				active_intents: [{ id: "PARENT-01", status: "active" }],
 			}),
 		)
 		vi.mocked(fs.writeFile).mockResolvedValue(undefined)
+		vi.mocked(fs.open).mockResolvedValue({ close: vi.fn() } as any)
+		vi.mocked(fs.unlink).mockResolvedValue(undefined)
 	})
 
 	it("should successfully spawn a sub-intent", async () => {
@@ -46,9 +54,9 @@ describe("SpawnSubIntentTool", () => {
 
 		expect(fs.writeFile).toHaveBeenCalled()
 		const call = vi.mocked(fs.writeFile).mock.calls[0]
-		const data = JSON.parse(call[1] as string)
+		const data = yaml.parse(call[1] as string)
 
-		const newIntent = data.intents.find((i: any) => i.id === "SUB-01")
+		const newIntent = data.active_intents.find((i: any) => i.id === "SUB-01")
 		expect(newIntent).toBeDefined()
 		expect(newIntent.parent_id).toBe("PARENT-01")
 		expect(pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Success: Spawned sub-intent 'SUB-01'"))
@@ -71,8 +79,8 @@ describe("SpawnSubIntentTool", () => {
 
 	it("should fail if sub-intent ID already exists", async () => {
 		vi.mocked(fs.readFile).mockResolvedValue(
-			JSON.stringify({
-				intents: [
+			yaml.stringify({
+				active_intents: [
 					{ id: "PARENT-01", status: "active" },
 					{ id: "SUB-01", parent_id: "PARENT-01" },
 				],
