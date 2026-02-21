@@ -62,8 +62,17 @@ const edit_file = {
 						"Number of replacements expected. Defaults to 1 if not specified. Use when you want to replace multiple occurrences of the same text.",
 					minimum: 1,
 				},
+				intent_id: {
+					type: "string",
+					description: "The ID of the active intent this mutation belongs to.",
+				},
+				mutation_class: {
+					type: "string",
+					enum: ["EVOLUTION", "REFACTOR", "FIX", "DOCS"],
+					description: "The classification of this change.",
+				},
 			},
-			required: ["file_path", "old_string", "new_string"],
+			required: ["file_path", "old_string", "new_string", "intent_id", "mutation_class"],
 			additionalProperties: false,
 		},
 	},
